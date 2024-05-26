@@ -1,0 +1,141 @@
+/**
+ * @file   AsyncFileLogger.h
+ * @author xiao guo
+ * 
+ *
+ * @date   2024-5-26 
+ */
+
+#pragma once
+
+#include <xiao/utils/NonCopyable.h>
+#include <memory>
+#include <string>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <xiao/utils/Date.h>
+
+BEGIN_NAMESPACE(xiao)
+
+using StringPtr = std::shared_ptr<std::string>;
+using StringPtrQueue = std::queue<StringPtr>;
+
+/**
+ * @brief This class implements utility functions for writing logs to files asynchronously.
+ */
+
+class XIAO_EXPORT AsyncFileLogger : NonCopyable
+{
+public:
+	/**
+	 * @brief Write the message to the log file.
+	 * 
+	 * \param msg
+	 * \param len
+	 */
+	void output(const char* msg, const uint64_t len);
+
+	/**
+	 * @brief Flush data from memory buffer to the log file.
+	 * 
+	 */
+	void flush();
+
+	/**
+	 * @brief Start writing log files.
+	 * 
+	 */
+	void startLogging();
+
+	void setFileSizeLimit(uint64_t limit)
+	{
+		sizeLimit_ = limit;
+	}
+
+	void setMaxFiles(size_t maxFiles)
+	{
+		maxFiles_ = maxFiles;
+	}
+
+	void setSwitchOnLimitOnly(bool flag = true)
+	{
+		switchOnLimitOnly_ = flag;
+	}
+
+	void setFileName(const std::string& baseName,
+					 const std::string& extName = ".log",
+				     const std::string& path = "./")
+	{
+		fileBaseName_ = baseName;
+		extName[0] == '.' ? fileExtName_ = extName
+			: fileExtName_ = std::string(".") + extName;
+		filePath_ = path;
+		if (filePath_.length() == 0)
+			filePath_ = "./";
+		if (filePath_[filePath_.length() - 1] != '/')
+			filePath_ = filePath_ + "/";
+	}
+	~AsyncFileLogger();
+	AsyncFileLogger();
+
+protected:
+	std::mutex mutex_;
+	std::condition_variable cond_;
+	uint64_t sizeLimit_{ 20 * 1024 * 1024 };
+	size_t maxFiles_{ 0 };
+	bool switchOnLimitOnly_{ false };
+	std::string filePath_{ "./" };
+	std::string fileBaseName_{ "xiao" };
+	std::string fileExtName_{ ".log" };
+	StringPtr logBufferPtr_;
+	StringPtr nextBufferPtr_;
+	bool stopFlag_{ false };
+	std::unique_ptr<std::thread> threadPtr_;
+	StringPtrQueue writeBuffers_;
+	StringPtrQueue tmpBuffers_;
+	void writeLogToFile(const StringPtr buf);
+	void logThreadFunc();
+
+	class LoggerFile : NonCopyable
+	{
+	public:
+		LoggerFile(const std::string& filePath,
+			const std::string& fileBaseName,
+			const std::string& fileExtName,
+			bool switchOnLimitOnly = false,
+			size_t maxFiles = 0);
+		~LoggerFile();
+		void writeLog(const StringPtr buf);
+		void open();
+		void switchLog(bool openNewOne);
+		uint64_t getLength();
+		explicit operator bool() const
+		{
+			return fp_ != nullptr;
+		}
+		void flush();
+
+	protected:
+		void initFilenameQueue();
+		void deleteOldFiles();
+
+		FILE* fp_{ nullptr };
+		Date creationDate_;
+		std::string fileFullName_;
+		std::string filePath_;
+		std::string fileBaseName_;
+		std::string fileExtName_;
+		static uint64_t fileSeq_;
+		bool switchOnLimitOnly_{ false };
+
+		size_t maxFiles_{ 0 };
+		std::deque<std::string> filenameQueue_;
+	};
+	std::unique_ptr<LoggerFile> loggerFilePtr_;
+
+	uint64_t lostCounter_{ 0 };
+	void swapBuffer();
+};
+
+END_NAMESPACE(xiao)
